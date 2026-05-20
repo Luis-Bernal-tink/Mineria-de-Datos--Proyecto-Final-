@@ -89,6 +89,78 @@ def load_calendario() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
+def load_serie_diaria_calendario() -> pd.DataFrame:
+    """`04_serie_diaria_calendario.csv` (notebook 04): serie diaria de pedidos
+    y revenue con las banderas del calendario brasileño ya unidas."""
+    df = pd.read_csv(CSV_DIR / "04_serie_diaria_calendario.csv",
+                     parse_dates=["fecha"])
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def eventos_uplift_ventas() -> pd.DataFrame:
+    """Para cada evento del calendario (Black Friday, Carnaval, feriados, etc.)
+    calcula los pedidos y revenue promedio del día del evento contra la línea
+    base de días sin evento, y reporta el uplift porcentual.
+
+    Devuelve columnas: nombre_feriado, dias_observados, pedidos_prom,
+    revenue_prom, uplift_pedidos_pct, uplift_revenue_pct.
+    """
+    df = load_serie_diaria_calendario()
+    if df.empty:
+        return pd.DataFrame()
+    base_pedidos = df.loc[df["tipo"].isna(), "pedidos"].mean()
+    base_revenue = df.loc[df["tipo"].isna(), "revenue"].mean()
+
+    eventos = (
+        df[df["nombre_feriado"].notna()]
+          .groupby("nombre_feriado")
+          .agg(dias_observados=("fecha", "count"),
+               pedidos_prom=("pedidos", "mean"),
+               revenue_prom=("revenue", "mean"))
+          .reset_index()
+    )
+    eventos["uplift_pedidos_pct"] = (
+        (eventos["pedidos_prom"] - base_pedidos) / base_pedidos * 100
+    )
+    eventos["uplift_revenue_pct"] = (
+        (eventos["revenue_prom"] - base_revenue) / base_revenue * 100
+    )
+    return eventos.sort_values("uplift_revenue_pct", ascending=False).reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def eventos_uplift_base() -> dict:
+    """Base diaria (sin evento) usada como referencia del uplift."""
+    df = load_serie_diaria_calendario()
+    if df.empty:
+        return {"pedidos": 0.0, "revenue": 0.0}
+    return {
+        "pedidos": float(df.loc[df["tipo"].isna(), "pedidos"].mean()),
+        "revenue": float(df.loc[df["tipo"].isna(), "revenue"].mean()),
+    }
+
+
+@st.cache_data(show_spinner=False)
+def alertas_resumen_calendario() -> dict:
+    """Cuenta cuántas alertas críticas son esperadas por calendario vs anómalas.
+
+    El notebook 07 escribe la columna `categoria_alerta` con valores
+    NORMAL / ESPERADA_POR_CALENDARIO / ANOMALA_INVESTIGAR. Aquí las contamos
+    para que las vistas y el LLM puedan hacer foco en las anómalas.
+    """
+    al = load_alertas()
+    if al.empty or "categoria_alerta" not in al.columns:
+        return {"esperadas": 0, "anomalas": 0, "criticas_totales": 0}
+    criticas = al[al["tipo"] != "OK"]
+    return {
+        "esperadas": int((criticas["categoria_alerta"] == "ESPERADA_POR_CALENDARIO").sum()),
+        "anomalas":  int((criticas["categoria_alerta"] == "ANOMALA_INVESTIGAR").sum()),
+        "criticas_totales": int(len(criticas)),
+    }
+
+
+@st.cache_data(show_spinner=False)
 def load_comparacion_v1v2() -> pd.DataFrame:
     return pd.read_csv(CSV_DIR / "08_comparacion_v1_v2.csv")
 

@@ -686,23 +686,34 @@ def handle_alertas_globales(_text: str) -> AgentResponse:
 
     n_stock = int((al["tipo"] == "STOCKOUT").sum())
     n_sobre = int((al["tipo"] == "SOBRE-STOCK").sum())
+    resumen_cal = D.alertas_resumen_calendario()
+    n_esperadas = resumen_cal["esperadas"]
+    n_anomalas  = resumen_cal["anomalas"]
     text = (
         f"Para los próximos **14 días** hay **{n_stock} avisos de quiebre de stock** "
         f"y **{n_sobre} avisos de exceso**. "
+        f"De esos avisos críticos, **{n_esperadas} caen en un evento del calendario** "
+        f"(Black Friday, Día de la Madre, Carnaval…) y **{n_anomalas} son anómalos** "
+        f"— estos últimos son los que conviene investigar primero. "
         f"El detalle por categoría:"
     )
+    chips = [
+        (f"Stockout: {n_stock}", "alert"),
+        (f"Sobre-stock: {n_sobre}", "warn"),
+    ]
+    if n_esperadas:
+        chips.append((f"Esperados por calendario: {n_esperadas}", "ok"))
+    if n_anomalas:
+        chips.append((f"Anómalos: {n_anomalas}", "alert"))
     return AgentResponse(
         intent="alertas_globales",
         text=text,
-        chips=[
-            (f"Stockout: {n_stock}", "alert"),
-            (f"Sobre-stock: {n_sobre}", "warn"),
-        ],
+        chips=chips,
         table=resumen,
         followups=[
             "¿Qué tan urgente es bed bath table?",
-            "¿Qué se espera vender en salud y belleza?",
-            "¿Cuáles son las acciones más urgentes?",
+            "¿Qué avisos son anómalos?",
+            "¿Cómo afectan los feriados a las ventas?",
         ],
     )
 
@@ -722,24 +733,50 @@ def handle_alertas_categoria(text: str) -> AgentResponse:
     n_stock = int((al_cat["tipo"] == "STOCKOUT").sum())
     n_sobre = int((al_cat["tipo"] == "SOBRE-STOCK").sum())
     n_ok    = int((al_cat["tipo"] == "OK").sum())
+    criticas = al_cat[al_cat["tipo"] != "OK"]
+    n_esperadas = (
+        int((criticas["categoria_alerta"] == "ESPERADA_POR_CALENDARIO").sum())
+        if "categoria_alerta" in criticas.columns else 0
+    )
+    n_anomalas = (
+        int((criticas["categoria_alerta"] == "ANOMALA_INVESTIGAR").sum())
+        if "categoria_alerta" in criticas.columns else 0
+    )
+    contexto_extra = ""
+    if n_esperadas + n_anomalas > 0:
+        contexto_extra = (
+            f"\n\nDe los avisos críticos, **{n_esperadas}** son esperados por el "
+            f"calendario (evento conocido) y **{n_anomalas}** son anómalos "
+            f"(sin evento que los justifique — revisar primero)."
+        )
     text = (
         f"Para **{categoria_humana(cat)}** los próximos 14 días traen:\n\n"
         f"- **{n_stock} días** con riesgo de quedarse sin stock\n"
         f"- **{n_sobre} días** con riesgo de exceso de inventario\n"
-        f"- **{n_ok} días** dentro de lo normal\n\n"
+        f"- **{n_ok} días** dentro de lo normal"
+        f"{contexto_extra}\n\n"
         "Detalle día por día:"
     )
-    tabla = al_cat[["fecha", "tipo", "mensaje"]].copy()
+    cols_tabla = ["fecha", "tipo"]
+    if "evento_calendario" in al_cat.columns:
+        cols_tabla.append("evento_calendario")
+    cols_tabla.append("mensaje")
+    tabla = al_cat[cols_tabla].copy()
     tabla["fecha"] = pd.to_datetime(tabla["fecha"]).dt.strftime("%Y-%m-%d")
+    if "evento_calendario" in tabla.columns:
+        tabla["evento_calendario"] = tabla["evento_calendario"].fillna("—")
     tabla = tabla.rename(columns={
-        "fecha": "Fecha",
-        "tipo":  "Tipo de aviso",
-        "mensaje": "Acción recomendada",
+        "fecha":             "Fecha",
+        "tipo":              "Tipo de aviso",
+        "evento_calendario": "Evento del calendario",
+        "mensaje":           "Acción recomendada",
     })
     chips = []
     if n_stock: chips.append((f"Stockout: {n_stock} días", "alert"))
     if n_sobre: chips.append((f"Sobre-stock: {n_sobre} días", "warn"))
     if n_ok:    chips.append((f"Normal: {n_ok} días", "ok"))
+    if n_esperadas: chips.append((f"Esperados: {n_esperadas}", "ok"))
+    if n_anomalas:  chips.append((f"Anómalos: {n_anomalas}", "alert"))
     return AgentResponse(
         intent="alertas_categoria",
         text=text,

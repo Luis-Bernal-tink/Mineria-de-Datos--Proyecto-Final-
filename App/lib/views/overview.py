@@ -81,3 +81,24 @@ def render():
                      unsafe_allow_html=True)
         st.plotly_chart(C.bar_estado_retraso(D.retraso_por_estado(), top_n=12),
                          use_container_width=True, theme=None)
+
+    # ---- Calendario y ventas ------------------------------------------
+    uplift = D.eventos_uplift_ventas()
+    if not uplift.empty:
+        base = D.eventos_uplift_base()
+        st.markdown(T.section("Cómo mueven las ventas los días festivos y de oferta",
+                               badge="Gráfica 4",
+                               meta="diferencia vs día normal"),
+                     unsafe_allow_html=True)
+        st.markdown(T.method_note(
+            "Cada barra compara el promedio diario del evento contra la línea "
+            f"base de un día sin evento (<strong>{base['pedidos']:.0f} pedidos</strong> y "
+            f"<strong>R$ {base['revenue']:,.0f}</strong>). Los positivos suben las "
+            "ventas (Black Friday, Día de la Madre); los negativos las deprimen "
+            "(Carnaval, feriados largos). Este es el mismo calendario que el "
+            "sistema usa para distinguir picos esperados de anomalías reales en "
+            "los avisos de inventario.",
+            label="Cómo leerlo",
+        ), unsafe_allow_html=True)
+        st.plotly_chart(C.bar_uplift_eventos(uplift),
+                         use_container_width=True, theme=None)

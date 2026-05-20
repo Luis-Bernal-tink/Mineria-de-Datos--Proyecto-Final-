@@ -25,6 +25,7 @@ import json
 import os
 from typing import Optional
 
+import pandas as pd
 import streamlit as st
 
 from . import agent as A
@@ -210,6 +211,27 @@ def build_data_context() -> str:
                  f"estrategia: {r['estrategia_reabastecimiento']}")
 
     L.append("")
+    L.append("## Picos de ventas asociados a eventos del calendario")
+    uplift = D.eventos_uplift_ventas()
+    base = D.eventos_uplift_base()
+    if not uplift.empty:
+        L.append(f"Línea base diaria sin evento: {base['pedidos']:.0f} pedidos · "
+                 f"R$ {base['revenue']:,.0f} de revenue.")
+        L.append("Eventos que SUBEN las ventas (uplift positivo vs día normal):")
+        for _, r in uplift[uplift["uplift_revenue_pct"] > 0].iterrows():
+            L.append(f"- {r['nombre_feriado']}: "
+                     f"{r['pedidos_prom']:.0f} pedidos ({r['uplift_pedidos_pct']:+.0f}%) · "
+                     f"R$ {r['revenue_prom']:,.0f} revenue ({r['uplift_revenue_pct']:+.0f}%) "
+                     f"en {int(r['dias_observados'])} días observados")
+        bajas = uplift[uplift["uplift_revenue_pct"] <= 0]
+        if not bajas.empty:
+            L.append("Eventos que BAJAN las ventas (uplift negativo — días no laborales o feriados sin componente comercial):")
+            for _, r in bajas.iterrows():
+                L.append(f"- {r['nombre_feriado']}: "
+                         f"{r['pedidos_prom']:.0f} pedidos ({r['uplift_pedidos_pct']:+.0f}%) · "
+                         f"R$ {r['revenue_prom']:,.0f} revenue ({r['uplift_revenue_pct']:+.0f}%)")
+
+    L.append("")
     L.append("## Efecto del calendario sobre la tasa de retraso")
     media = ped["is_late_delivery"].mean()
     cohortes = [
@@ -239,6 +261,32 @@ def build_data_context() -> str:
                  for t in ("STOCKOUT", "SOBRE-STOCK", "OK")
                  if int(row.get(t, 0)) > 0]
         L.append(f"- {cat}: {', '.join(parts)}")
+
+    L.append("")
+    L.append("## Avisos cruzados con el calendario")
+    resumen_cal = D.alertas_resumen_calendario()
+    L.append(f"- avisos críticos esperados por calendario (caen en un evento o ventana pre-evento): "
+             f"{resumen_cal['esperadas']}")
+    L.append(f"- avisos críticos anómalos (sin evento que los justifique — prioritarios): "
+             f"{resumen_cal['anomalas']}")
+    if "categoria_alerta" in al.columns:
+        criticas = al[al["tipo"] != "OK"]
+        anomalas = criticas[criticas["categoria_alerta"] == "ANOMALA_INVESTIGAR"]
+        if not anomalas.empty:
+            L.append("Detalle de avisos anómalos (sin evento conocido — investigar primero):")
+            for _, r in anomalas.head(8).iterrows():
+                fecha_str = r["fecha"].strftime("%Y-%m-%d") if hasattr(r["fecha"], "strftime") else str(r["fecha"])[:10]
+                L.append(f"- {r['categoria']} · {fecha_str} · {r['tipo']}")
+        con_evento = criticas[criticas["evento_calendario"].notna()] if "evento_calendario" in criticas.columns else pd.DataFrame()
+        if not con_evento.empty:
+            L.append("Eventos del calendario que disparan avisos:")
+            for evento, sub in con_evento.groupby("evento_calendario"):
+                cats = sub["categoria"].unique().tolist()
+                L.append(f"- {evento}: en {', '.join(cats)} ({len(sub)} avisos)")
+    L.append("Cómo usar este corte: si el usuario pregunta por un aviso, "
+             "menciona si es 'esperado por calendario' (citar el evento) o "
+             "'anómalo' (recomendar investigar campañas no planeadas, problemas "
+             "de seller o demand shock).")
 
     L.append("")
     L.append("## Calidad del modelo de retraso (Random Forest tuneado, v2)")

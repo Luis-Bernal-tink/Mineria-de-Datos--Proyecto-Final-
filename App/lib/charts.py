@@ -182,6 +182,36 @@ def forecast_chart(historico: pd.DataFrame, alertas: pd.DataFrame,
     return _apply(fig, height=460)
 
 
+# --- Picos de ventas por evento del calendario ------------------------------
+def bar_uplift_eventos(df: pd.DataFrame) -> go.Figure:
+    """Barras horizontales del uplift de revenue (%) por evento del calendario.
+    Verdes los eventos que suben las ventas, ámbar los que las bajan."""
+    d = df.sort_values("uplift_revenue_pct", ascending=True).copy()
+    colors = [T.EMERALD if v > 0 else T.AMBER for v in d["uplift_revenue_pct"]]
+    texto = [f"{v:+.0f}%" for v in d["uplift_revenue_pct"]]
+    fig = go.Figure(go.Bar(
+        x=d["uplift_revenue_pct"], y=d["nombre_feriado"], orientation="h",
+        marker=dict(color=colors, line=dict(width=0)),
+        text=texto, textposition="outside",
+        textfont=dict(family="JetBrains Mono", color=T.TEXT_DIM, size=11),
+        customdata=np.stack([
+            d["pedidos_prom"], d["revenue_prom"], d["uplift_pedidos_pct"],
+        ], axis=-1),
+        hovertemplate=(
+            "<b>%{y}</b><br>"
+            "Pedidos promedio: %{customdata[0]:,.0f}<br>"
+            "Revenue promedio: R$ %{customdata[1]:,.0f}<br>"
+            "Uplift pedidos: %{customdata[2]:+.1f}%<br>"
+            "Uplift revenue: %{x:+.1f}%<extra></extra>"
+        ),
+    ))
+    fig.update_xaxes(title="Diferencia vs día normal (% en revenue)",
+                     ticksuffix="%", zeroline=True, zerolinecolor=T.BORDER,
+                     zerolinewidth=1)
+    fig.update_yaxes(title="")
+    return _apply(fig, height=max(280, 26 * len(d)))
+
+
 # --- Scatter de sellers (clusters) ------------------------------------------
 def scatter_sellers(df: pd.DataFrame, color_palette: list[str]) -> go.Figure:
     d = df.copy()

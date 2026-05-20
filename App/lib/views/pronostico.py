@@ -65,6 +65,14 @@ def render():
     n_ok       = int((al_cat["tipo"] == "OK").sum())
     n_total    = len(al_cat)
 
+    # Clasificación de avisos por contexto del calendario
+    if "categoria_alerta" in al_cat.columns:
+        criticas = al_cat[al_cat["tipo"] != "OK"]
+        n_esperadas = int((criticas["categoria_alerta"] == "ESPERADA_POR_CALENDARIO").sum())
+        n_anomalas  = int((criticas["categoria_alerta"] == "ANOMALA_INVESTIGAR").sum())
+    else:
+        n_esperadas = n_anomalas = 0
+
     st.markdown(T.kpi_grid(
         T.kpi_card("Días en riesgo de quedarse sin stock", str(n_stockout),
                     delta="hay que reabastecer", delta_dir="down"),
@@ -74,6 +82,23 @@ def render():
                     delta="todo bajo control", delta_dir="up"),
         T.kpi_card("Días analizados en total", str(n_total)),
     ), unsafe_allow_html=True)
+
+    # Chips de contexto: cuántos avisos caen en evento conocido vs anomalía
+    if n_esperadas + n_anomalas > 0:
+        st.markdown(
+            T.chip(f"Esperados por calendario: {n_esperadas}", "ok") + " " +
+            T.chip(f"Anómalos (revisar): {n_anomalas}", "alert"),
+            unsafe_allow_html=True,
+        )
+        st.markdown(T.method_note(
+            "Cada aviso crítico se cruza con el calendario brasileño: si la "
+            "fecha cae en un evento (Black Friday, Día de la Madre, Carnaval, "
+            "feriado nacional…) o en sus 7 días previos, se marca como "
+            "<strong>esperado</strong> — el equipo lo planifica como pico "
+            "estacional. Los avisos <strong>anómalos</strong> no tienen evento "
+            "que los justifique y son los que conviene investigar primero.",
+            label="Cómo se clasifican los avisos",
+        ), unsafe_allow_html=True)
 
     # ---- Gráfica principal --------------------------------------------
     hist = pd.DataFrame({
@@ -94,17 +119,31 @@ def render():
     if al_cat.empty:
         st.info("No hay avisos para esta categoría.")
     else:
-        tabla = al_cat.sort_values("fecha")[
-            ["fecha", "tipo", "lim_inf", "lim_sup",
-             "p10_hist", "p90_hist", "mensaje"]
-        ].rename(columns={
-            "fecha":     "Fecha",
-            "tipo":      "Tipo de aviso",
-            "lim_inf":   "Mínimo esperado",
-            "lim_sup":   "Máximo esperado",
-            "p10_hist":  "Mínimo histórico",
-            "p90_hist":  "Máximo histórico",
-            "mensaje":   "Acción recomendada",
+        cols_base = ["fecha", "tipo"]
+        if "evento_calendario" in al_cat.columns:
+            cols_base.append("evento_calendario")
+        if "categoria_alerta" in al_cat.columns:
+            cols_base.append("categoria_alerta")
+        cols_base += ["lim_inf", "lim_sup", "p10_hist", "p90_hist", "mensaje"]
+        tabla = al_cat.sort_values("fecha")[cols_base].copy()
+        if "categoria_alerta" in tabla.columns:
+            tabla["categoria_alerta"] = tabla["categoria_alerta"].map({
+                "ESPERADA_POR_CALENDARIO": "Esperado por calendario",
+                "ANOMALA_INVESTIGAR":      "Anómalo — revisar",
+                "NORMAL":                  "Día normal",
+            }).fillna(tabla["categoria_alerta"])
+        if "evento_calendario" in tabla.columns:
+            tabla["evento_calendario"] = tabla["evento_calendario"].fillna("—")
+        tabla = tabla.rename(columns={
+            "fecha":              "Fecha",
+            "tipo":               "Tipo de aviso",
+            "evento_calendario":  "Evento del calendario",
+            "categoria_alerta":   "Contexto",
+            "lim_inf":            "Mínimo esperado",
+            "lim_sup":            "Máximo esperado",
+            "p10_hist":           "Mínimo histórico",
+            "p90_hist":           "Máximo histórico",
+            "mensaje":            "Acción recomendada",
         })
         tabla["Fecha"] = tabla["Fecha"].dt.strftime("%Y-%m-%d")
         st.dataframe(
